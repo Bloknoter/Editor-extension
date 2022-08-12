@@ -16,192 +16,271 @@ namespace EditorExtension.Diagnostics
             GetWindow(typeof(ScriptDiagnosis), false, "Diagnosis", true).position = new Rect(500, 100, 500, 500);
         }
 
-        private Vector2 scrollPos;
+        // GUI properties
 
-        private MonoBehaviour target;
+        private Vector2 firstTabScrollPos;
+        private Vector2 secondTabScrollPos;
+
+        private string[] tabs = new string[] { "Parsing", "Invokation" };
+        private int currtab;
 
         private bool showFullNames = false;
 
         private bool isDiagnosed;
 
+        private bool invokableFound;
+
+        // General target info
+
+        private UnityEngine.Object target;
+
         private Type type;
 
-        private List<FieldInfo> publicFieldInfos = new List<FieldInfo>();
-        private List<FieldInfo> nonpublicFieldInfos = new List<FieldInfo>();
-        private List<FieldInfo> staticFieldInfos = new List<FieldInfo>();
+        // Target info
 
+        private List<FieldInfo> fieldInfos = new List<FieldInfo>();
 
         private List<PropertyInfo> propertyInfos = new List<PropertyInfo>();
-
         private List<EventInfo> eventInfos = new List<EventInfo>();
+
+        private List<MethodInfo> methodInfos = new List<MethodInfo>();
+
+        // Labels
+
+        private GUIContent errorIcon;
+
+        private void OnEnable()
+        {
+            errorIcon = EditorGUIUtility.IconContent("console.erroricon.sml");
+            errorIcon.tooltip = "fix errors!";
+        }
 
         private void OnGUI()
         {
-            MonoBehaviour newmono = (MonoBehaviour)EditorGUILayout.ObjectField(new GUIContent("Target script"), target, typeof(MonoBehaviour), true);
+            UnityEngine.Object newTarget = EditorGUILayout.ObjectField(new GUIContent("Target object"), target, typeof(UnityEngine.Object), true);
             showFullNames = EditorGUILayout.Toggle("Show full type names", showFullNames);
-            if (GUILayout.Button("Diagnose", GUILayout.Width(120)) && target != null)
+
+            EditorGUILayout.Separator();
+
+            currtab = GUILayout.Toolbar(currtab, tabs);
+            EditorGUILayout.Separator();
+            EditorGUILayout.Separator();
+
+            if (currtab == 0)
             {
-                isDiagnosed = true;
-                target = newmono;
-                publicFieldInfos.Clear();
-                nonpublicFieldInfos.Clear();
-                staticFieldInfos.Clear();
-                eventInfos.Clear();
-                propertyInfos.Clear();
-
-                type = target.GetType();
-
-                List<FieldInfo> fieldInfos = new List<FieldInfo>();
-
-                eventInfos.AddRange(type.GetRuntimeEvents());
-                propertyInfos.AddRange(type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static));
-                fieldInfos.AddRange(type.GetRuntimeFields());
-                for (int i = 0; i < fieldInfos.Count; i++)
+                if (target != null)
                 {
-                    //Debug.Log($"field: {fieldInfos[i].Name}    type: {fieldInfos[i].MemberType}");
-                    bool isEvent = type.GetEvent(fieldInfos[i].Name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null;
-                    /*if (type.GetProperty(fieldInfos[i].Name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null)
-                        Debug.Log($"it is property");*/
-                    if (!isEvent)
+                    if (GUILayout.Button("Diagnose", GUILayout.Width(120)))
                     {
-                        if (fieldInfos[i].IsStatic)
+                        isDiagnosed = true;
+                        target = newTarget;
+                        fieldInfos.Clear();
+                        propertyInfos.Clear();
+
+                        ExtractType();
+
+                        List<FieldInfo> newFieldInfos = new List<FieldInfo>();
+
+                        eventInfos.AddRange(type.GetRuntimeEvents());
+                        propertyInfos.AddRange(type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static));
+                        newFieldInfos.AddRange(type.GetRuntimeFields());
+                        for (int i = 0; i < newFieldInfos.Count; i++)
                         {
-                            staticFieldInfos.Add(fieldInfos[i]);
+                            if (!isObsolete(newFieldInfos[i]))
+                            {
+                                //Debug.Log($"field: {fieldInfos[i].Name}    type: {fieldInfos[i].MemberType}");
+                                bool isEvent = type.GetEvent(newFieldInfos[i].Name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null;
+                                /*if (type.GetProperty(fieldInfos[i].Name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null)
+                                    Debug.Log($"it is property");*/
+                                if (!isEvent)
+                                {
+                                    fieldInfos.Add(newFieldInfos[i]);
+                                }
+                            }
                         }
-                        else if (fieldInfos[i].IsPublic)
+                        for (int i = 0; i < propertyInfos.Count; i++)
                         {
-                            publicFieldInfos.Add(fieldInfos[i]);
+                            if (propertyInfos[i].DeclaringType == typeof(MonoBehaviour) || propertyInfos[i].DeclaringType == typeof(Behaviour) ||
+                                propertyInfos[i].DeclaringType == typeof(Component) || propertyInfos[i].DeclaringType == typeof(UnityEngine.Object))
+                            {
+                                propertyInfos.RemoveAt(i);
+                                i--;
+                            }
+                            else if(isObsolete(propertyInfos[i]))
+                            {
+                                propertyInfos.RemoveAt(i);
+                                i--;
+                            }
+                        }
+                    }
+                    if (target != null && isDiagnosed)
+                    {
+                        firstTabScrollPos = EditorGUILayout.BeginScrollView(firstTabScrollPos, true, true);
+                        EditorGUILayout.BeginVertical(GUILayout.Width(3000));
+                        EditorGUILayout.LabelField($"Type: {ConvertTypeName(type)}");
+
+                        EditorGUILayout.Space();
+                        EditorGUILayout.LabelField("FIELDS");
+                        EditorGUILayout.Space();
+                        EditorGUI.indentLevel++;
+                        if (fieldInfos.Count > 0)
+                        {
+                            for (int i = 0; i < fieldInfos.Count; i++)
+                            {
+                                DisplayField(fieldInfos[i]);
+                                EditorGUILayout.Space();
+                            }
                         }
                         else
                         {
-                            nonpublicFieldInfos.Add(fieldInfos[i]);
+                            EditorGUI.indentLevel++;
+                            EditorGUILayout.LabelField("No fields found");
+                            EditorGUI.indentLevel--;
                         }
-                    }
-                }
-                for(int i = 0; i < propertyInfos.Count;i++)
-                {
-                    if(propertyInfos[i].DeclaringType == typeof(MonoBehaviour) || propertyInfos[i].DeclaringType == typeof(Behaviour) ||
-                        propertyInfos[i].DeclaringType == typeof(Component) || propertyInfos[i].DeclaringType == typeof(UnityEngine.Object))
-                    {
-                        propertyInfos.RemoveAt(i);
-                        i--;
+                        EditorGUI.indentLevel--;
+
+                        if (propertyInfos.Count > 0)
+                        {
+                            EditorGUILayout.Space();
+                            EditorGUILayout.LabelField("PROPERTIES");
+                            EditorGUILayout.Space();
+                            EditorGUI.indentLevel++;
+                            for (int i = 0; i < propertyInfos.Count; i++)
+                            {
+                                DisplayProperty(propertyInfos[i]);
+                                EditorGUILayout.Space();
+                            }
+                            EditorGUILayout.Space();
+                            EditorGUI.indentLevel--;
+                        }
+
+                        EditorGUILayout.Space();
+                        if (eventInfos.Count > 0)
+                        {
+                            EditorGUILayout.LabelField("EVENTS");
+                            EditorGUILayout.Space();
+                            EditorGUI.indentLevel++;
+                            for (int i = 0; i < eventInfos.Count; i++)
+                            {
+                                DisplayEvent(eventInfos[i]);
+                                EditorGUILayout.Space();
+                            }
+                            EditorGUI.indentLevel--;
+                            EditorGUILayout.Space();
+                        }
+                        EditorGUILayout.EndVertical();
+                        EditorGUILayout.EndScrollView();
                     }
                 }
             }
-            if (newmono == target && target != null && isDiagnosed)
+            else if(currtab == 1)
             {
-                scrollPos = EditorGUILayout.BeginScrollView(scrollPos, true, true);
-                EditorGUILayout.BeginVertical(GUILayout.Width(3000));
-                EditorGUILayout.LabelField($"Type: {ConvertTypeName(type)}");
+                if (target != null)
+                {
+                    if (GUILayout.Button("Search", GUILayout.Width(110)))
+                    {
+                        methodInfos.Clear();
+                        target = newTarget;
+                        ExtractType();
 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField("FIELDS");
-                EditorGUILayout.Space();
-                EditorGUI.indentLevel++;
-                if (publicFieldInfos.Count > 0)
-                {
-                    EditorGUILayout.LabelField("public: ");
-                    EditorGUI.indentLevel++;
-                    for (int i = 0; i < publicFieldInfos.Count; i++)
-                    {
-                        DisplayField(publicFieldInfos[i]);
-                        EditorGUILayout.Space();
-                    }
-                    EditorGUI.indentLevel--;
-                    EditorGUILayout.Space();
-                }
-                if (nonpublicFieldInfos.Count > 0)
-                {
-                    EditorGUILayout.LabelField("non-public: ");
-                    EditorGUI.indentLevel++;
-                    for (int i = 0; i < nonpublicFieldInfos.Count; i++)
-                    {
-                        DisplayField(nonpublicFieldInfos[i]);
-                        EditorGUILayout.Space();
-                    }
-                    EditorGUI.indentLevel--;
-                    EditorGUILayout.Space();
-                }
-                if (staticFieldInfos.Count > 0)
-                {
-                    EditorGUILayout.LabelField("static: ");
-                    EditorGUI.indentLevel++;
-                    for (int i = 0; i < staticFieldInfos.Count; i++)
-                    {
-                        DisplayField(staticFieldInfos[i]);
-                        EditorGUILayout.Space();
-                    }
-                    EditorGUI.indentLevel--;
-                }
-                if (publicFieldInfos.Count == 0 && nonpublicFieldInfos.Count == 0 && staticFieldInfos.Count == 0)
-                {
-                    EditorGUI.indentLevel++;
-                    EditorGUILayout.LabelField("No fields found");
-                    EditorGUI.indentLevel--;
-                }
-                EditorGUI.indentLevel--;
+                        List<MethodInfo> newMethodInfos = new List<MethodInfo>();
+                        newMethodInfos.AddRange(type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static));
 
-                if (propertyInfos.Count > 0)
-                {
-                    EditorGUILayout.Space();
-                    EditorGUILayout.LabelField("PROPERTIES");
-                    EditorGUILayout.Space();
-                    EditorGUI.indentLevel++;
-                    for (int i = 0; i < propertyInfos.Count; i++)
-                    {
-                        DisplayProperty(propertyInfos[i]);
-                        EditorGUILayout.Space();
+                        for(int i = 0; i < newMethodInfos.Count;i++)
+                        {
+                            if(!newMethodInfos[i].IsConstructor && !newMethodInfos[i].IsGenericMethod)
+                            {
+                                if(!isObsolete(newMethodInfos[i]))
+                                {
+                                    methodInfos.Add(newMethodInfos[i]);
+                                }
+                            }
+                        }
+
+                        methodInfos.AddRange(newMethodInfos);
+
+                        invokableFound = true;
                     }
-                    EditorGUILayout.Space();
-                    EditorGUI.indentLevel--;
                 }
 
-                EditorGUILayout.Space();
-                if (eventInfos.Count > 0)
+                if(target != null && invokableFound)
                 {
-                    EditorGUILayout.LabelField("EVENTS");
-                    EditorGUILayout.Space();
+                    secondTabScrollPos = EditorGUILayout.BeginScrollView(secondTabScrollPos, true, true);
+                    EditorGUILayout.BeginVertical(GUILayout.Width(3000));
                     EditorGUI.indentLevel++;
-                    for (int i = 0; i < eventInfos.Count; i++)
+                    for(int i = 0; i < methodInfos.Count;i++)
                     {
-                        DisplayEvent(eventInfos[i]);
-                        EditorGUILayout.Space();
+                        DisplayMethodHeader(methodInfos[i]);
+                        DisplayMethodParameters(methodInfos[i]);
+                        EditorGUILayout.Separator();
                     }
                     EditorGUI.indentLevel--;
-                    EditorGUILayout.Space();
+                    EditorGUILayout.EndVertical();
+                    EditorGUILayout.EndScrollView();
                 }
-                EditorGUILayout.EndVertical();
-                EditorGUILayout.EndScrollView();
+            }
+            if(target == null)
+            {
+                EditorGUILayout.LabelField("Select target object to diagnose it");
+            }
+            if (target != newTarget || target == null)
+            {
+                target = newTarget;
+                isDiagnosed = false;
+                invokableFound = false;
+            }
+        }
+
+        private void ExtractType()
+        {
+            if(target != null)
+            {
+                type = target.GetType();
             }
             else
             {
-                target = newmono;
-                isDiagnosed = false;
+                type = null;
             }
         }
 
         private void DisplayField(FieldInfo field)
         {
+            string mods = "";
+            if (field.IsPublic)
+                mods = "public ";
+            else
+                mods = "non-public ";
+            if (field.IsStatic)
+                mods += "static";
             object value = field.GetValue(target);
             if (value is IList)
             {
-                EditorGUILayout.LabelField($"{field.Name} ({ConvertTypeName(field.FieldType)}) : ");
+                EditorGUILayout.LabelField($"{mods} {field.Name} ({ConvertTypeName(field.FieldType)}) : ");
                 EditorGUI.indentLevel++;
-                DisplayList((IList)value);
+                DisplayListContent((IList)value);
                 EditorGUI.indentLevel--;
             }
             else
             {
-                EditorGUILayout.LabelField($"{field.Name} ({ConvertTypeName(field.FieldType)}) : {ParseValue(value)}");
+                EditorGUILayout.LabelField($"{mods} {field.Name} ({ConvertTypeName(field.FieldType)}) : {ParseValue(value)}");
             }
         }
 
         private void DisplayEvent(EventInfo eventInfo)
         {
-            MulticastDelegate multicastDelegate = (MulticastDelegate)target.GetType().GetField(eventInfo.Name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).GetValue(target);
+            FieldInfo field = target.GetType().GetField(eventInfo.Name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            MulticastDelegate multicastDelegate = (MulticastDelegate)field.GetValue(target);
             if (multicastDelegate != null)
             {
-                EditorGUILayout.LabelField($"Event : {eventInfo.Name}");
+                string header = $"";
+                if (field.IsPublic)
+                    header = "public ";
+                else
+                    header = "non-public ";
+                if (field.IsStatic)
+                    header += "static ";
+                header += $"event : {eventInfo.Name}";
+                EditorGUILayout.LabelField(header);
                 Delegate[] delegates = multicastDelegate.GetInvocationList();
                 if (delegates.Length > 0)
                 {
@@ -274,7 +353,7 @@ namespace EditorExtension.Diagnostics
                 {
                     EditorGUILayout.LabelField($"{property.Name} ({ConvertTypeName(property.PropertyType)}) {{ {getter}{setter}}} : ");
                     EditorGUI.indentLevel++;
-                    DisplayList((IList)value);
+                    DisplayListContent((IList)value);
                     EditorGUI.indentLevel--;
                 }
                 else
@@ -284,7 +363,7 @@ namespace EditorExtension.Diagnostics
                 EditorGUILayout.LabelField($"{property.Name} {{ {setter}}}");
         }
 
-        private void DisplayList(IList list)
+        private void DisplayListContent(IList list)
         {
             if (list != null)
             {
@@ -307,10 +386,111 @@ namespace EditorExtension.Diagnostics
                 EditorGUILayout.LabelField($"null array");
         }
 
+        private void DisplayMethodHeader(MethodInfo methodInfo)
+        {
+            string mods = "";
+            if (methodInfo.IsPublic)
+                mods = "public ";
+            else
+                mods = "non-public ";
+            if (methodInfo.IsStatic)
+                mods += "static";
+            if (methodInfo.IsAbstract)
+                mods += "abstract";
+            if (methodInfo.IsVirtual)
+                mods += "virtual";
+
+            string returnType = ConvertTypeName(methodInfo.ReturnType);
+
+            EditorGUILayout.LabelField($"{mods} {returnType} {methodInfo.Name}");
+        }
+
+        private void DisplayMethodParameters(MethodInfo methodInfo)
+        {
+            EditorGUI.indentLevel++;
+            ParameterInfo[] parametersInfo = methodInfo.GetParameters();
+            object[] parameters = new object[0];
+            bool canBeInvoked = true;
+            if (parametersInfo.Length > 0)
+            {
+                canBeInvoked = false;
+                /*EditorGUILayout.LabelField("PARAMETERS: ");
+                EditorGUILayout.Separator();
+                
+                parameters = new object[parametersInfo.Length];
+                for (int i = 0; i < parametersInfo.Length; i++)
+                {
+                    if (parametersInfo[i].IsOut)
+                    {
+                        canBeInvoked = false;
+                    }
+                    else if (!parametersInfo[i].IsOptional)
+                    {
+                        if (parametersInfo[i].ParameterType == typeof(Color))
+                        {
+                            parameters[i] = EditorGUILayout.ColorField(parametersInfo[i].Name, pa)
+                        }
+                    }
+                }*/
+            }
+            // Color AnimationCurve double float gradient int string long object rect rectint bool Vector2 Vetcor2int Vector3 Vector3INt Vector4
+            if (canBeInvoked)
+            {
+                if (GUILayout.Button("Invoke", GUILayout.Width(100)))
+                {
+                    methodInfo.Invoke(target, parameters);
+                }
+            }
+            else
+            {
+                GUIContent errorInfo = new GUIContent("Cannot invoke method because not all parameters could be set", errorIcon.image, "Invokation error");
+                EditorGUILayout.LabelField(errorInfo);
+            }
+            EditorGUI.indentLevel--;
+        }
+
+        private bool isObsolete(FieldInfo memberInfo)
+        {
+            List<Attribute> attributes = new List<Attribute>();
+            attributes.AddRange(memberInfo.GetCustomAttributes<Attribute>());
+            for(int i = 0; i < attributes.Count;i++)
+            {
+                if (attributes[i].GetType() == typeof(ObsoleteAttribute))
+                    return true;
+            }
+            return false;
+        }
+
+        private bool isObsolete(PropertyInfo memberInfo)
+        {
+            List<Attribute> attributes = new List<Attribute>();
+            attributes.AddRange(memberInfo.GetCustomAttributes<Attribute>());
+            for (int i = 0; i < attributes.Count; i++)
+            {
+                if (attributes[i].GetType() == typeof(ObsoleteAttribute))
+                    return true;
+            }
+            return false;
+        }
+
+        private bool isObsolete(MethodInfo memberInfo)
+        {
+            List<Attribute> attributes = new List<Attribute>();
+            attributes.AddRange(memberInfo.GetCustomAttributes<Attribute>());
+            for (int i = 0; i < attributes.Count; i++)
+            {
+                if (attributes[i].GetType() == typeof(ObsoleteAttribute))
+                    return true;
+            }
+            return false;
+        }
+
         private string ConvertTypeName(Type type)
         {
             if (type == null)
                 return "null type";
+            if (type == typeof(void))
+                return "void";
             if (showFullNames)
                 return type.ToString();
             if(type == typeof(int))
@@ -397,7 +577,7 @@ namespace EditorExtension.Diagnostics
                 if (value is Vector3)
                     return $"[ {FormatFloats(((Vector3)value).x)} , {FormatFloats(((Vector3)value).y)} , {FormatFloats(((Vector3)value).z)} ]";
                 if (value is Color)
-                    return $"[ {FormatFloats(((Color)value).r)} , {FormatFloats(((Color)value).g)} , {FormatFloats(((Color)value).b)} , a : {FormatFloats(((Color)value).a)} ]";
+                    return $"[ {FormatFloats(((Color)value).r)} , {FormatFloats(((Color)value).g)} , {FormatFloats(((Color)value).b)} , alpha : {FormatFloats(((Color)value).a)} ]";
                 string valueStr = value.ToString();
                 return valueStr;
             }
