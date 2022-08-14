@@ -12,7 +12,6 @@ using EditorExtension.CuriousInspector.AttributeHandlers;
 namespace EditorExtension.CuriousInspector
 {
     [CustomEditor(typeof(UnityEngine.Object), true, isFallback = true)]
-    [CanEditMultipleObjects]
     public class CuriousInspector : Editor
     {
         private Type currType;

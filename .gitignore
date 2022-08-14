@@ -69,3 +69,4 @@ crashlytics-build.properties
 
 # Custom
 *.cs.meta
+*.meta
